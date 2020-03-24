@@ -1,0 +1,226 @@
+
+/*
+Programa de envio de datos en formato de estructura entre 2 tareas.
+Se añade la funcion de una tarea testigo, la cual es suspendida y resumida por las otras dos tareas
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+
+#include "esp_log.h"
+
+
+
+
+#define T1 "TASK1"
+#define T2 "TASK2"
+#define T3 "TASK3"
+#define MAIN "MAIN"
+
+
+/*manejador de QUEUE*/
+QueueHandle_t myQueue = NULL;
+/*manejador de tarea*/
+TaskHandle_t xTestigo = NULL;
+
+
+/*Creacion de la estructura de envio*/
+
+struct MensjeQueue
+{
+    char valor1[30];
+    char valor2[30];
+    char valor3[30];
+    
+};
+
+typedef struct MensjeQueue MensjeQueue_t; //redefine el tipo de datos para mejor manejo
+
+
+/*Creacion de tarea que produce el mensaje*/
+
+static void productor(void* arg)
+{   
+
+/*Declaracion de la estructura de envio*/
+
+    MensjeQueue_t valor;
+
+/*Llenado de los strings de la estructura*/
+
+    strcpy(valor.valor1,"hola");
+    strcpy(valor.valor2,"que");
+    strcpy(valor.valor3,"tal");
+
+/*Retardo para forzar mensaje de QUEUE vacia en Tarea consumidor*/
+
+    vTaskDelay(5000 / portTICK_RATE_MS);
+    for(;;) {
+/*Envio de datos*/
+
+    if(xQueueSend(myQueue,(void *)&valor,(TickType_t )0)){
+          ESP_LOGI(T1, "Envio completado!!!"); 
+
+        }
+
+    else {ESP_LOGI(T1, "QUEUE LLENA!!");vTaskResume(xTestigo);}
+    vTaskDelay(1000 / portTICK_RATE_MS);
+    }
+
+}
+
+
+/*Creacion de tarea que recibe el mensaje*/
+
+
+static void consumidor(void* arg)
+{ 
+    /*Declaracion de la estructura de recepcion*/
+  MensjeQueue_t recibido;
+    for(;;) {
+        /*Recepcion de datos*/
+        if(xQueueReceive(myQueue,(void*)&recibido,(TickType_t )0)){
+
+        ESP_LOGI(T2,"Mensaje recibido");
+        ESP_LOGI(T2,"Los valores del mensaje son: %s\t%s\t%s",recibido.valor1,recibido.valor2,recibido.valor3);
+    
+    }
+    else {ESP_LOGI(T2, "QUEUE VACIA!!!!");vTaskSuspend(xTestigo);}
+    vTaskDelay(5000 / portTICK_RATE_MS);
+    }
+
+
+}
+
+
+/*Creacion de tarea testigo*/
+
+static void testigo(void* arg)
+{ 
+
+    int cont = 0;
+    for(;;) {
+
+        ESP_LOGI(T3,"Conteo Testigo: %d",cont++);
+        vTaskDelay(100 / portTICK_RATE_MS);
+
+    }
+
+
+     
+    
+
+}
+
+void app_main()
+{
+ 
+    /*Reserva del espacio en memoria y cantidad de elemen tos que usa la QUEUE*/
+    myQueue = xQueueCreate(1,sizeof(MensjeQueue_t));
+    //crear tareas
+    xTaskCreate(productor, "productor", 2048, NULL, 1, NULL);
+    xTaskCreate(consumidor, "consumidor", 2048, NULL, 1, NULL);
+    xTaskCreate(testigo, "testigo", 2048, NULL, 1, &xTestigo);
+
+    while(1) {
+        vTaskDelay(2000 / portTICK_RATE_MS);
+        
+    ESP_LOGI(MAIN, "Main sigue corriendo en el fondo haciendo nada....");
+
+    /*Se pregunta por estados de la tarea y se imprimer dicho estado*/
+    if(eTaskGetState(xTestigo)==eSuspended)
+        ESP_LOGI(MAIN, "El estado del testigo es:Suspended");
+    else if(eTaskGetState(xTestigo)==eReady)
+        ESP_LOGI(MAIN, "El estado del testigo es:Ready");
+
+
+
+    }
+}
+
+
+/*
+
+PROTOTIPOS DE FUNCIONES
+
+
+Tareas
+
+
+eTaskState eTaskGetState(TaskHandle_t xTask)
+
+Constantes:
+
+• eReady
+• eRunning
+• eBlocked
+• eSuspended
+• eDeleted
+
+******************Resume una tarea**********************
+
+void vTaskResume(TaskHandle_t pxTaskToResume)
+
+******************Suspende una tarea**********************
+
+void vTaskSuspend(TaskHandle_t pxTaskToSuspend)
+
+******************Crea una tarea**********************
+
+BaseType_t xTaskCreate(
+pdTASK_CODE pvTaskCode,
+const signed portCHAR* pcName,
+unsigned portSHORT usStackDepth,
+void* pvParameters,
+unsigned portBASE_TYPE uxPriority,
+xTaskHandle* pxCreatedTask)
+
+Queue
+
+******************Crea la queue**********************
+
+QueueHandle_t xQueueCreate(
+UBaseType_t uxQueueLength,
+UBaseType_t uxItemSize);
+
+******************Envia al final de la queue**********************
+
+BaseType_t xQueueSendToBack(
+QueueHandle_t xQueue,
+const void* pvItemToQueue,
+TickType_t xTicksToWait);
+
+******************Envia al principio de la queue**********************
+
+BaseType_t xQueueSend(
+QueueHandle_t xQueue,
+const void* pvItemToQueue,
+TickType_t xTicksToWait
+);
+
+******************Recibe los datos**********************
+
+BaseType_t xQueueReceive(
+QueueHandle_t xQueue,
+void* pvBuffer,
+TickType_t xTicksToWait);
+
+
+
+******************Reinicia la queue**********************
+
+xQueueReset
+BaseType_t xQueueReset(QueueHandle_t xQueue);
+
+
+******************Sobreescribe el primer valor de la queue**********************
+
+xQueueOverwrite
+BaseType_t xQueueOverwrite(QueueHandle_t xQueue, const void *pvItemToQueue)
+
+
+*/

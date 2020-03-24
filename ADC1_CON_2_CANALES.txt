@@ -1,0 +1,133 @@
+
+
+
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/gpio.h"
+#include "driver/adc.h"
+#include "esp_log.h"
+#include "esp_adc_cal.h"
+
+
+#define DEFAULT_VREF    1100        //Use adc2_vref_to_gpio() to obtain a better estimate
+#define NO_OF_SAMPLES   64          //Multisampling
+#define MAIN "Main"
+#define T1 "Analog_Converter_Task"
+
+static esp_adc_cal_characteristics_t *adc_chars1;
+static const adc_channel_t channel1 = ADC_CHANNEL_6;     //GPIO34
+
+static esp_adc_cal_characteristics_t *adc_chars2;
+static const adc_channel_t channel2 = ADC_CHANNEL_7;     //GPIO35
+
+static const adc_atten_t atten = ADC_ATTEN_DB_0; //cero DB de atenuacion, soporta hasta 1.1V en la entrada
+static const adc_unit_t unit = ADC_UNIT_1;
+
+static void check_efuse(void)
+{
+    //Check TP is burned into eFuse
+    if (esp_adc_cal_check_efuse(ESP_ADC_CAL_VAL_EFUSE_TP) == ESP_OK) {
+        printf("eFuse Two Point: Supported\n");
+    } else {
+        printf("eFuse Two Point: NOT supported\n");
+    }
+
+    //Check Vref is burned into eFuse
+    if (esp_adc_cal_check_efuse(ESP_ADC_CAL_VAL_EFUSE_VREF) == ESP_OK) {
+        printf("eFuse Vref: Supported\n");
+    } else {
+        printf("eFuse Vref: NOT supported\n");
+    }
+}
+
+static void print_char_val_type(esp_adc_cal_value_t val_type)
+{
+    if (val_type == ESP_ADC_CAL_VAL_EFUSE_TP) {
+        printf("Characterized using Two Point Value\n");
+    } else if (val_type == ESP_ADC_CAL_VAL_EFUSE_VREF) {
+        printf("Characterized using eFuse Vref\n");
+    } else {
+        printf("Characterized using Default Vref\n");
+    }
+}
+
+
+static void Analog_Converter_Task(void* arg)
+{    
+    ESP_LOGI(T1,"Corriendo");
+    check_efuse();
+       //Configuracion de los ADC ADC
+    adc1_config_width(ADC_WIDTH_BIT_12); //numero de bits que se utilizan. Es requisito que sea en esta secuencia
+    adc1_config_channel_atten(channel1, atten); // inicializa el canal 6
+    adc1_config_channel_atten(channel2, atten); // inicializa el canal 6
+
+    //Caracterizacion del ADC, es solo para el ejemplo
+
+    //ADC1 canal 6
+    adc_chars1 = calloc(1, sizeof(esp_adc_cal_characteristics_t));
+    esp_adc_cal_value_t val_type1 = esp_adc_cal_characterize(unit, atten, ADC_WIDTH_BIT_12, DEFAULT_VREF, adc_chars1);
+    print_char_val_type(val_type1);
+
+    //ADC1 canal 7
+    adc_chars2 = calloc(1, sizeof(esp_adc_cal_characteristics_t));
+    esp_adc_cal_value_t val_type2 = esp_adc_cal_characterize(unit, atten, ADC_WIDTH_BIT_12, DEFAULT_VREF, adc_chars2);
+    print_char_val_type(val_type2);
+
+
+    for(;;) {
+
+        
+        ESP_LOGI(T1,"Inicio de conversion");
+        uint32_t adc_reading = 0;
+        //Multisampling para obtener un valor mas exacto
+        for (int i = 0; i < NO_OF_SAMPLES; i++) {
+                adc_reading += adc1_get_raw((adc1_channel_t)channel1);// convierte para el canal 6
+
+        }
+        adc_reading /= NO_OF_SAMPLES;
+
+        //Convert adc_reading to voltage in mV
+        uint32_t voltage = esp_adc_cal_raw_to_voltage(adc_reading, adc_chars1);
+        
+        ESP_LOGI(T1,"Conversion Canal 6\nRaw: %d\tVoltage: %dmV", adc_reading, voltage);
+
+        adc_reading = 0;
+        //Multisampling para obtener un valor mas exacto
+        for (int i = 0; i < NO_OF_SAMPLES; i++) {
+                adc_reading += adc1_get_raw((adc1_channel_t)channel2);// convierte para el canal 7
+
+        }
+        adc_reading /= NO_OF_SAMPLES;
+
+        //Convert adc_reading to voltage in mV
+        voltage = esp_adc_cal_raw_to_voltage(adc_reading, adc_chars2);
+        ESP_LOGI(T1,"Conversion Canal 7\nRaw: %d\tVoltage: %dmV", adc_reading, voltage);
+        ESP_LOGI(T1,"Espera para nueva conversion");
+        vTaskDelay(pdMS_TO_TICKS(5000));
+
+    }
+
+}
+
+
+
+void app_main(void)
+{
+    ESP_LOGI(MAIN,"Programa ADC Medicion ADC 2 canales");
+    
+    xTaskCreate(Analog_Converter_Task,"Analog_Converter_Task", 2048, NULL, 1, NULL);
+
+    while (1) {
+    
+    vTaskDelay(2000 / portTICK_RATE_MS);
+    ESP_LOGI(MAIN, "Main sigue corriendo en el fondo haciendo nada....");
+    }
+}
+
+//Algo de doc
+
+//https://docs.espressif.com/projects/esp-idf/en/latest/api-reference/peripherals/adc.html#_CPPv425adc1_config_channel_atten14adc1_channel_t11adc_atten_t
